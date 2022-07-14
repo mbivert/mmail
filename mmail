@@ -1,0 +1,185 @@
+#!/bin/sh
+
+set -e
+
+# Based on matts (http://daemonforums.org/showthread.php?t=3480)
+# by Adriaan van Roosmalen (j65nko, administrator daemonforums.org).
+#
+# Previous link is a good read as an introduction to multipart emails;
+# code is rather straightforward from there.
+
+# Dependencies
+if ! which openssl > /dev/null; then
+	echo 'openssl(1) not found in $PATH' 1>&2
+	exit 1
+fi
+
+# Automatically select between sha256sum(1) and sha256(1)
+# depending on what's installed.
+sha256=sha256sum
+
+if ! which $sha256 >/dev/null 2>&1; then
+	sha256=sha256
+	if ! which $sha256 >/dev/null 2>&1; then
+		echo 'neither sha256sum(1) nor sha256(1) found in $PATH' 1>&2
+		exit 1
+	fi
+fi
+
+# Headers hashtable implemented as directories:
+#	file'sname     <-> header's name
+#	file's content <-> header's value
+#
+# Respectively for:
+#	1. first/main section
+#	2. body
+#	3. base for all attachments
+mheads=`mktemp -d /tmp/mail.$$.XXXXXX`
+bheads=`mktemp -d /tmp/mail.$$.XXXXXX`
+aheads=`mktemp -d /tmp/mail.$$.XXXXXX`
+
+boundary="==B=O=U=N=D=A=R=Y=$(date | $sha256 | cut -d' ' -f1)=="
+
+# Read a single header.
+#
+# NOTE: header is expected to have been correctly formatted.
+#
+# Input:
+#	$1 : headers directory
+#	$2 : header as a string, e.g. "Subject: hello, world!"
+# Output:
+#	Header has been stored to $1
+readhead() {
+	m=
+	echo "$2" | sed '1s/://;q' | {
+		while read x y; do
+			m="$x"
+			echo "$y" > "$1/$m"
+		done
+		echo "$2" | sed 1d >> "$1/$m"
+	}
+}
+
+# Display help message.
+#
+# Input:
+#	$1 : exit code
+# Output:
+#	Help on stderr; program would have been terminated.
+help() {
+	p=`basename $0`
+	s=`echo $p | sed 's/./ /g'`
+	echo "$p [-h]"                                                            1>&2
+	echo "$p [-kp] [-f from] [-t to] [-c cc] [-b bcc] [-s subject] [-m body]" 1>&2
+	echo "$s [-x \"name: value\"] [-y \"name: value\" ] [-z \"name: value\"]" 1>&2
+	echo "$s [attachments ...]"                                               1>&2
+	exit $1
+}
+
+# Register base headers
+#
+# Input:
+# Output:
+#	$mheads, $bheads and $aheads have been populated with default values.
+baseheads() {
+	readhead $mheads "MIME-Version: 1.0"
+	readhead $mheads "Content-Type: multipart/mixed;
+	boundary=\"$boundary\""
+	readhead $mheads "Content-Transfer-Encoding: 7bit"
+
+	readhead $bheads "Content-Type: text/plain; charset=UTF-8"
+	readhead $bheads "Content-Transfer-Encoding: 7bit"
+
+	readhead $aheads "Content-Transfer-Encoding: base64"
+}
+
+baseheads
+
+body=/dev/stdin
+check=
+send="sendmail -t"
+
+while getopts hf:t:c:b:s:x:y:z:m:kp x; do
+	case $x in
+		h) help 0;;
+		f) readhead $mheads "From: $OPTARG";;
+		t) readhead $mheads "To: $OPTARG";;
+		c) readhead $mheads "Cc: $OPTARG";;
+		b) readhead $mheads "Bcc: $OPTARG";;
+		s) readhead $mheads "Subject: $OPTARG";;
+		x) readhead $mheads "$OPTARG";;
+		y) readhead $bheads "$OPTARG";;
+		z) readhead $aheads "$OPTARG";;
+		m) body="$OPTARG";;
+		k) check=1;;
+		p) send=cat;;
+	esac
+done
+shift `expr $OPTIND - 1`
+
+# Print given headers
+#
+# Input:
+#	$1 : headers directory
+# Output:
+#	Headers displayed on stdout, e.g. "Subject: hello, world!"
+printheads() {
+	ls $1 | while read x; do
+		echo "$x:" "$(cat $1/$x)"
+	done
+}
+
+# Print a small warning in case of formatting issues or
+# email reader issue.
+#
+# Input:
+# Output:
+#	Warning on stdout
+printwarn() {
+	cat <<EOF
+If you see this, either this mail has been poorly crafted,
+or your client doesn't handle well multipart emails.
+EOF
+}
+
+# Generates headers and base64 for a named file.
+#
+# Input:
+#	$1 : attachment file name
+#	/dev/stdin : file content
+# Output:
+#	Boundary, headers and base64 for stdin
+attach() {
+	echo; echo "--$boundary"
+	readhead $aheads "Content-Type: application/octet-stream; name=\"$1\""
+	readhead $aheads "Content-Disposition: attachment; filename=\"$1\""
+	printheads $aheads
+	openssl base64
+}
+
+# Print the full mail
+#
+# Input:
+#	$* : list of attachments, if any
+# Output:
+#	Mail generated from CLI arguments.
+printmail() {
+	printheads $mheads; echo; printwarn
+
+	echo; echo "--$boundary"
+	printheads $bheads; cat $body
+
+	if [ -n "$*" ] && [ -n "$check" ]; then
+		$sha256 $* | attach SHA256
+	fi
+
+	for x in $*; do
+		cat $x | attach `basename $x`
+	done
+
+	echo; echo "--$boundary--"; echo
+}
+
+printmail $* | $send
+
+rm -rf "$mheads" "$bheads" "$aheads"

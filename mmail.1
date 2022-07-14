@@ -1,0 +1,124 @@
+.Dd $Mdocdate$
+.Dt mmail 1
+.Os mmail 1.0
+.Sh NAME
+.Nm mmail
+.Nd MIME mail 1.0
+.Sh SYNOPSIS
+.Nm
+.Bk -words
+.Op Fl h
+.Ek
+.Nm
+.Bk -words
+.Op Fl kp
+.Op Fl f Ar from
+.Op Fl t Ar to
+.Op Fl c Ar cc
+.Op Fl b Ar bcc
+.Op Fl s Ar subject
+.Op Fl m Ar body
+.Op Fl x Dq header-name: header-value
+.Op Fl y Dq header-name: header-value
+.Op Fl z Dq header-name: header-value
+.Op Ar attachments ...
+.Ek
+.Sh DESCRIPTION
+.Nm
+sends or creates multipart emails, in accordance to
+the MIME (Multipurpose Internet Mail Extension) protocol.
+Attachments, if any, are base64 encoded via
+.Xr openssl 1 .
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl h
+Display a short help message.
+.It Fl k
+If some attachments are specified,
+.Fl k
+will prepend to the list of attachments a SHA256 file,
+containing a sha256 checksum of all the attachments.
+The exact format of this file will be OS-dependent.
+.It Fl p
+By default, the mail is sent via
+.Xr sendmail 8 ,
+but if
+.Fl p
+is specified, the email will be printed to stdout instead.
+This allows debugging, further tweaking, or sending the
+email with a
+.Xr sendmail 8
+alternative.
+.It Fl f Ar from
+Set the value of the "From:" header.
+.It Fl t Ar to
+Set the value of the "To:" header.
+.It Fl c Ar cc
+Set the value of the "Cc:" header.
+.It Fl b Ar bcc
+Set the value of the "Bcc:" header.
+.It Fl s Ar subject
+Set the value of the "Subject:" header.
+.It Fl m Ar body
+Set the content of the email's body. If not specified,
+the body is read from stdin.
+.It Fl x Dq header-name: header-value
+Set a main header, that is, a header of the first part
+of the multipart email. Multiple
+.Fl x
+can be specified. Note that
+.Fl tcbs
+are convenience shortcuts over
+.Fl x .
+.It Fl y Dq header-name: header-value
+Set a body header, that is, a header of the second part
+of the multipart email, containing the body. Multiple
+.Fl y
+can be specified.
+.It Fl z Dq header-name: header-value
+Set common attachments header, that is, headers that
+will be used for all attachments. Multiple
+.Fl z
+can be specified. Note that
+.Dq Content-Type: ...
+and
+.Dq Content-Disposition: ...
+will systematically be overwritten for each attachment;
+setting them with
+.Fl z
+is a no-op.
+.It Ar attachments
+Is an optional list of files to attach to the email. Each
+attachment will be named according to its
+.Xr basename 1 .
+.El
+.Sh EXAMPLES
+Send an email with no attachment, and with 'test' as body:
+.Bd -literal -offset indent
+echo test \&| mmail -f foo@gmail.com -t bar@gmail.com
+.Ed
+.Pp
+Or, more explicitly:
+.Bd -literal -offset indent
+echo test \&| mmail -x "From: foo@gmail.com" \\
+                  -x "To: bar@gmail.com"
+.Ed
+.Pp
+With the same pair of sender/receiver, send log files, with
+checksums, and an ISO-8859-1 encoded body, instead
+of the default UTF-8:
+.Bd -literal -offset indent
+mmail -k -f foo@gmail.com -t bar@gmail.com              \\
+      -y "Content-Type: text/plain; charset=ISO-8859-1" \\
+      -m path/to/iso-8859-1-encoded-body-message.txt    \\
+      /var/log/authlog /var/www/logs/access.log
+.Ed
+.Sh HISTORY
+.Nm
+is based on
+.Xr matts 1 ,
+by Adriaan van Roosmalen.
+.Sh SEE ALSO
+.Xr openssl 8 ,
+.Xr sendmail 8 ,
+.Xr mail 1 .
